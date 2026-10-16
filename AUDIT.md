@@ -179,8 +179,8 @@ behaviour. Run `tests\Invoke-Tests.ps1` once on your PC before the real run.
    .\Restore-ExifToolOriginals.ps1 -Path 'E:\Photos' -WhatIf   # preview
    .\Restore-ExifToolOriginals.ps1 -Path 'E:\Photos'           # restore
    ```
-   The edited copies go to `E:\Photos\_exiftool-modified\` (same layout) rather than
-   being deleted. Files that were edited with `-overwrite_original` (no backup) can't be
+   The edited copies go to `E:\Photos (exiftool edited copies)\` (same layout, next to
+   the photo folder rather than inside it) instead of being deleted. Files that were edited with `-overwrite_original` (no backup) can't be
    restored this way; their image data is intact, but their date and GPS may be wrong.
    The new script corrects the date when Google's timestamp disagrees, and GPS when it
    is more than 1 km off.

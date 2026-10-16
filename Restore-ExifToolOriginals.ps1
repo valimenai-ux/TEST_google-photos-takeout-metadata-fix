@@ -20,7 +20,9 @@
     Folder to search recursively.
 
 .PARAMETER ModifiedFolder
-    Where the edited copies are moved. Defaults to "_exiftool-modified" inside -Path.
+    Where the edited copies are moved. Defaults to a folder next to -Path, e.g.
+    "E:\Photos (exiftool edited copies)" for -Path "E:\Photos". It is kept outside -Path
+    so the edited copies aren't picked up when -Path is later used as a source folder.
 
 .PARAMETER DeleteModified
     Delete the edited copies instead of moving them.
@@ -42,13 +44,24 @@ $ErrorActionPreference = 'Stop'
 
 $root = $PSCmdlet.GetUnresolvedProviderPathFromPSPath($Path)
 if (-not [IO.Directory]::Exists($root)) { throw "Folder not found: $root" }
-$root = [IO.Path]::GetFullPath($root).TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
-if (-not $ModifiedFolder) { $ModifiedFolder = Join-Path $root '_exiftool-modified' }
-$modifiedRoot = [IO.Path]::GetFullPath($PSCmdlet.GetUnresolvedProviderPathFromPSPath($ModifiedFolder)).TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
+$rootNoSlash = [IO.Path]::GetFullPath($root).TrimEnd('\', '/')
+$root = $rootNoSlash + [IO.Path]::DirectorySeparatorChar
+if (-not $ModifiedFolder -and -not $DeleteModified) {
+    $parent = [IO.Path]::GetDirectoryName($rootNoSlash)
+    if (-not $parent) { throw "-Path is a drive root; pass -ModifiedFolder (a folder elsewhere) or -DeleteModified." }
+    $ModifiedFolder = Join-Path $parent ([IO.Path]::GetFileName($rootNoSlash) + ' (exiftool edited copies)')
+}
+$modifiedRoot = ''
+if ($ModifiedFolder) {
+    $modifiedRoot = [IO.Path]::GetFullPath($PSCmdlet.GetUnresolvedProviderPathFromPSPath($ModifiedFolder)).TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
+    if ($modifiedRoot.StartsWith($root, [StringComparison]::OrdinalIgnoreCase)) {
+        Write-Warning "The edited copies will be moved inside $root. Don't use that folder as a source for Invoke-GPhotosMetadataFix.ps1 without removing them first."
+    }
+}
 
 $backups = @(Get-ChildItem -LiteralPath $root -Recurse -File -Filter '*_original' |
     Where-Object { $_.Name.EndsWith('_original', [StringComparison]::OrdinalIgnoreCase) -and
-        -not $_.FullName.StartsWith($modifiedRoot, [StringComparison]::OrdinalIgnoreCase) })
+        -not ($modifiedRoot -and $_.FullName.StartsWith($modifiedRoot, [StringComparison]::OrdinalIgnoreCase)) })
 
 $restored = 0
 $problems = 0

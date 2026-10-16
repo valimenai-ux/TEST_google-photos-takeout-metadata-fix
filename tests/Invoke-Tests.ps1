@@ -177,6 +177,12 @@ try {
     $longName = 'PXL_20230615_123456789.PORTRAIT.ORIGINAL.jpg'
     New-Media $longName 'sample.jpg' | Out-Null
     New-Sidecar (($longName + '.supplemental-metadata').Substring(0, 46) + '.json') (ConvertTo-Unix '2023-06-15 12:34:56')
+    # Long name + duplicate: both sidecars truncate to the same 46 characters, only "(1)" differs.
+    $longBase = 'Screenshot_20230615-123456_Some Long App Name Here'
+    New-Media ($longBase + '.jpg') 'sample.jpg' | Out-Null
+    New-Media ($longBase + '(1).jpg') 'sample.jpg' | Out-Null
+    New-Sidecar ($longBase.Substring(0, 46) + '.json') (ConvertTo-Unix '2023-06-15 16:00:00')
+    New-Sidecar ($longBase.Substring(0, 46) + '(1).json') (ConvertTo-Unix '2023-06-16 16:00:00')
     # Brackets in the name (wildcards in PowerShell paths).
     New-Media 'party[1].jpg' 'sample.jpg' | Out-Null
     New-Sidecar 'party[1].jpg.supplemental-metadata.json' (ConvertTo-Unix '2020-09-13 12:26:40')
@@ -281,6 +287,8 @@ try {
     Assert-Equal (Get-Tag (Get-Meta (Join-Path $destAlbum 'IMG_401(1).jpg')) 'ExifIFD:DateTimeOriginal') '2012:03:01 07:00:00' 'old style name.jpg(1).json'
     Assert-Equal (Get-Tag (Get-Meta (Join-Path $destAlbum 'IMG_402.jpg')) 'ExifIFD:DateTimeOriginal') '2012:04:01 08:00:00' 'old style name.json'
     Assert-Equal (Get-Tag (Get-Meta (Join-Path $destAlbum $longName)) 'ExifIFD:DateTimeOriginal') '2023:06:15 08:34:56' 'truncated sidecar name'
+    Assert-Equal (Get-Tag (Get-Meta (Join-Path $destAlbum ($longBase + '.jpg'))) 'ExifIFD:DateTimeOriginal') '2023:06:15 12:00:00' 'long name uses its truncated sidecar'
+    Assert-Equal (Get-Tag (Get-Meta (Join-Path $destAlbum ($longBase + '(1).jpg'))) 'ExifIFD:DateTimeOriginal') '2023:06:16 12:00:00' 'long name duplicate uses the (1) sidecar, not the original'
     Assert-Equal (Get-Tag (Get-Meta (Join-Path $destAlbum 'party[1].jpg')) 'ExifIFD:DateTimeOriginal') '2020:09:13 08:26:40' 'brackets in the file name'
 
     $m = Get-Meta (Join-Path $destAlbum $unicodeName)
@@ -348,7 +356,7 @@ try {
     & $restoreScript -Path $restoreDir *>&1 | Out-Null
     Assert-Equal (Get-FileHash -LiteralPath $original).Hash $originalHash 'original restored under its real name'
     Assert-True (-not (Test-Path -LiteralPath "${original}_original")) 'backup file is gone'
-    Assert-True (Test-Path -LiteralPath (Join-Path $restoreDir '_exiftool-modified/a.jpg')) 'edited copy moved aside'
+    Assert-True (Test-Path -LiteralPath (Join-Path $work 'restore (exiftool edited copies)/a.jpg')) 'edited copy moved to a folder next to (not inside) the restored folder'
 
     # -----------------------------------------------------------------------
     Write-Host "`nWindows PowerShell 5.1 compatibility"

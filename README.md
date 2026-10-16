@@ -36,8 +36,10 @@ the copy. **Your Takeout folder is never modified.**
 
   The copy's Created/Modified file dates are also set to the date taken.
 * **Keeps good data.** If a photo already has a camera date for the same moment, it's left
-  alone, which preserves the local time of photos taken in other time zones. If it differs,
-  you corrected it in Google Photos, so Google's date is used. An existing GPS position is
+  alone, which preserves the local time of photos taken in other time zones. If it differs
+  by more than a time-zone shift, you corrected it in Google Photos, so Google's date is
+  used. (A correction of a whole number of hours looks the same as a time-zone shift, so
+  the camera time is kept; use `-Overwrite` if you shifted times that way.) An existing GPS position is
   kept unless Google's is more than 1 km away. Use `-Overwrite` to always use Google's
   values.
 * **Resumes.** Files already in the destination are skipped, so you can stop and restart
@@ -105,7 +107,8 @@ The previous version of this script edited photos in place. If ExifTool left fil
 * The `_original` file is the **unmodified original**. Windows just doesn't recognise the
   extension.
 * `Restore-ExifToolOriginals.ps1` renames every `*_original` back to its real name and
-  moves the edited copy to `_exiftool-modified\`:
+  moves the edited copy to a folder next to it (e.g. `E:\Photos (exiftool edited copies)`),
+  so the edited copies aren't mixed in when you use the restored folder as the source:
   ```powershell
   .\Restore-ExifToolOriginals.ps1 -Path 'E:\Photos' -WhatIf   # preview
   .\Restore-ExifToolOriginals.ps1 -Path 'E:\Photos'

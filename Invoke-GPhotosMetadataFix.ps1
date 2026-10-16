@@ -278,9 +278,10 @@ function New-SidecarIndex {
 # Looks up "<name>.supplemental-metadata", "<name>" (older exports), or either one cut
 # short by Google's file name length limit, longest first.
 function Find-SidecarKey {
-    param($Table, [string]$Name, [string]$Suffix)
+    param($Table, [string]$Name, [string]$Suffix, [int]$MinLength = 0)
     $full = $Name + $SupplementalSuffix
     $shortest = [math]::Max(1, [math]::Min($Name.Length, $TruncatedKeyMinLength))
+    if ($MinLength -gt $shortest) { $shortest = $MinLength }
     for ($length = $full.Length; $length -ge $shortest; $length--) {
         $path = $Table[$full.Substring(0, $length) + $Suffix]
         if ($path) { return $path }
@@ -293,7 +294,17 @@ function Find-Sidecar {
     $counter = ''
     if ($null -ne $Media.DuplicateIndex) { $counter = [string]$Media.DuplicateIndex }
 
-    $path = Find-SidecarKey $Index.ByKey $Media.FileName ''
+    # A duplicate such as LONG_NAME(1).jpg must not take LONG_NAME.jpg's sidecar: when Google
+    # truncates long names, both sidecars share the same prefix and only the "(n)" differs.
+    # So for duplicates, check the counter-aware lookup first and only accept literal
+    # matches that contain the whole file name.
+    $literalMin = 0
+    if ($counter) {
+        $literalMin = $Media.FileName.Length
+        $path = Find-SidecarKey $Index.ByBase $Media.OriginalName ('|' + $counter)
+        if ($path) { return [pscustomobject]@{ Path = $path; Method = 'original name' } }
+    }
+    $path = Find-SidecarKey $Index.ByKey $Media.FileName '' $literalMin
     if ($path) { return [pscustomobject]@{ Path = $path; Method = 'file name' } }
     $path = Find-SidecarKey $Index.ByBase $Media.OriginalName ('|' + $counter)
     if ($path) { return [pscustomobject]@{ Path = $path; Method = 'original name' } }
@@ -976,6 +987,7 @@ try {
             } catch {
                 $item.Status = 'Failed'
                 $item.WriteError = $_.Exception.Message
+                try { Remove-FileIfPresent $item.TempPath } catch { Write-Verbose "Could not remove $($item.TempPath)" }
             }
         }
 
