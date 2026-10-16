@@ -1,109 +1,132 @@
-# 🤖 Google Photos Takeout Metadata Restoration Script
+# Google Photos Takeout Metadata Fix
 
-**A note on this Script and Readme:** An agent (a Large Language Model from OpenAI) helped write this script. An agent (a Large Language Model from Google) was used to write this documentation.
+Google Takeout exports your photos with their dates, locations and captions in separate
+`.json` files. Most photo apps never read those, so photos land on the wrong date or
+lose their location.
 
-**`Invoke-GPhotosMetadataFix.ps1`** is a powerful PowerShell script designed to fix the chronic metadata issues resulting from a Google Takeout export of your Google Photos library.
+**`Invoke-GPhotosMetadataFix.ps1`** copies your Takeout folder to a new location and uses
+[ExifTool](https://exiftool.org/) to write the metadata from each `.json` sidecar into
+the copy. **Your Takeout folder is never modified.**
 
-This script uses the robust **ExifTool** utility to read creation dates, descriptions, and GPS coordinates from the separate `.json` "sidecar" files and embed that correct metadata back into your corresponding image (`.jpg`, `.png`) and video (`.mp4`, `.mov`) files.
+> Upgrading from the old version? It edited photos in place and had several bugs that
+> wrote wrong dates and GPS positions. If you have files ending in `_original`, those are
+> your untouched originals. See [Recovering from the old version](#recovering-from-the-old-version)
+> and [AUDIT.md](AUDIT.md).
 
------
+## What it does
 
-## ⚠️ WARNING: Always Back Up Your Data\!
+* **Copies every file** to the destination with the same folder layout. Photos and videos
+  get their metadata added; everything else is copied as is.
+* **Never touches the source.** ExifTool always writes a new file (`-o`) and never edits
+  in place, so no `*_original` backup files are created.
+* **Checks every copy.** Each copy is written under a temporary name, its image/video data
+  is compared with the original (SHA-256), and only then is it moved into place. If
+  anything goes wrong, the original is copied unchanged and the report says so.
+* **Finds the right sidecar** for Google's naming quirks: `IMG_1.jpg.supplemental-metadata.json`,
+  names cut short at 51 characters, older `IMG_1.jpg.json`, duplicates like `IMG_1(2).jpg`,
+  edited copies (`IMG_1-edited.jpg`, and other languages), and live-photo videos that share
+  the photo's sidecar.
+* **Writes:**
 
-This script directly modifies your original photo and video files. Before running it, **you MUST create a full backup** of your Google Takeout directory. The script is designed to overwrite the original files with the corrected metadata. Proceed at your own risk.
+  | | Photos (JPG, PNG, HEIC, WEBP, TIFF, DNG) | GIF | Videos (MP4, MOV, M4V, 3GP) |
+  |---|---|---|---|
+  | Date taken | EXIF `DateTimeOriginal`, `CreateDate`, `OffsetTime*`; XMP `CreateDate`, `DateCreated` | XMP | QuickTime `CreateDate` etc. (UTC), `Keys:CreationDate` (local + offset) |
+  | Location | EXIF GPS with N/S/E/W refs and altitude | XMP GPS | `Keys` and `UserData` `GPSCoordinates` |
+  | Caption | EXIF `ImageDescription`, XMP `Description` | XMP `Description` | XMP `Description`, `Comment` |
 
------
+  The copy's Created/Modified file dates are also set to the date taken.
+* **Keeps good data.** If a photo already has a camera date for the same moment, it's left
+  alone, which preserves the local time of photos taken in other time zones. If it differs,
+  you corrected it in Google Photos, so Google's date is used. An existing GPS position is
+  kept unless Google's is more than 1 km away. Use `-Overwrite` to always use Google's
+  values.
+* **Resumes.** Files already in the destination are skipped, so you can stop and restart
+  at any time.
+* **Reports.** A CSV file in the destination lists every file: what was written, which
+  sidecar was used, and any problems.
 
-## 🚀 Key Features
+## Requirements
 
-This solution was developed with the assistance of an LLM (Large Language Model) to specifically address the inconsistencies found in Google Takeout archives:
+* Windows PowerShell 5.1 (built into Windows 10/11) or PowerShell 7+.
+* [ExifTool](https://exiftool.org/) 12.40 or later. On Windows, download the zip, extract
+  it, and **rename `exiftool(-k).exe` to `exiftool.exe`**.
 
-  * **Intelligent File Matching:** Correctly matches media files with their corresponding JSON files, even if the files have suffixes like `(1)`, `-edited`, or `-cropped`.
-  * **Full Date Restoration:** Prioritizes the `photoTakenTime` from the JSON to restore the true creation date of the media.
-  * **Video Support:** Correctly writes date and description tags for video files (`.mp4`, `.mov`) using the QuickTime and Track metadata fields.
-  * **Location and Description:** Restores both GPS coordinates (Latitude/Longitude) and any user-added descriptions/captions.
-  * **Fallback Logic (Enhanced):** Attempts to parse dates directly from common timestamp-based filenames if the JSON file is missing or corrupted. **The script now correctly recognizes dates separated by an underscore (`_`) in filenames (e.g., `YYYYMMDD_HHMMSS`) and uses an unambiguous date format for successful parsing.**
+## Usage
 
------
+1. Extract all your Takeout `.zip` files into one folder, e.g. `D:\Takeout`.
+2. Open PowerShell in the folder containing this script. If scripts are blocked, run:
+   `Set-ExecutionPolicy -Scope Process Bypass`
+3. Preview what will happen (nothing is written):
+   ```powershell
+   .\Invoke-GPhotosMetadataFix.ps1 -SourcePath 'D:\Takeout\Google Photos' -DestinationPath 'E:\Photos' -ExifToolPath 'C:\Tools\exiftool.exe' -WhatIf
+   ```
+4. Run it:
+   ```powershell
+   .\Invoke-GPhotosMetadataFix.ps1 -SourcePath 'D:\Takeout\Google Photos' -DestinationPath 'E:\Photos' -ExifToolPath 'C:\Tools\exiftool.exe'
+   ```
+5. Open the `gphotos-metadata-report-*.csv` in the destination and review any rows
+   marked `CopiedWithoutMetadata` or `Failed`, or noted "no sidecar found".
 
-## 🔧 Prerequisites
+From Command Prompt:
+```cmd
+powershell -ExecutionPolicy Bypass -File "C:\path\to\Invoke-GPhotosMetadataFix.ps1" -SourcePath "D:\Takeout\Google Photos" -DestinationPath "E:\Photos" -ExifToolPath "C:\Tools\exiftool.exe"
+```
 
-1.  **PowerShell:** This script requires PowerShell 5.1 or later (standard on most modern Windows systems).
-2.  **ExifTool:** The script relies entirely on [Phil Harvey's ExifTool](https://exiftool.org/) for metadata manipulation.
-      * You must download the Windows executable (`exiftool.exe`) and place it in a stable location.
+### Parameters
 
------
+| Parameter | Description |
+|---|---|
+| `-SourcePath` | Extracted Takeout folder (searched recursively). Only read, never changed. |
+| `-DestinationPath` | Where the copies go. Must be outside the source folder. |
+| `-ExifToolPath` | Path to `exiftool.exe`. Optional if ExifTool is on the PATH or next to the script. |
+| `-TimeZone` | Time zone for the local "date taken", e.g. `"Eastern Standard Time"` (or `"America/New_York"` in PowerShell 7). Default: this PC's time zone. |
+| `-Overwrite` | Always write Google's date and GPS, even when the file already has matching values. |
+| `-Force` | Redo files that already exist in the destination. |
+| `-SkipVerification` | Skip the source/copy image data comparison (faster). |
+| `-IncludeSidecars` | Also copy the `.json` files. |
+| `-ReportPath` | Custom location for the CSV report. |
+| `-WhatIf` | Show what would be done without writing anything. |
 
-## 📝 Usage
+### Report statuses
 
-To run the script, you must define the paths for your photo directory and the ExifTool executable within the `.ps1` file itself.
+| Status | Meaning |
+|---|---|
+| `Written` | Copied, metadata added, image data verified identical to the source. |
+| `Copied` | Copied unchanged: nothing to add, or not a photo/video ExifTool can write. |
+| `CopiedWithoutMetadata` | Metadata couldn't be written (e.g. a PNG saved as `.jpg`); the file was copied unchanged. The reason is in `Notes`. |
+| `Skipped` | Already in the destination (use `-Force` to redo). |
+| `Failed` | The file couldn't be copied at all. |
 
-### Step 1: Download and Modify the Script
+## Recovering from the old version
 
-1.  Download the **`Invoke-GPhotosMetadataFix.ps1`** file.
-2.  Open the file in a text editor (like VS Code, Notepad++, or Windows PowerShell ISE).
-3.  Locate the `param` block at the very top of the script:
+The previous version of this script edited photos in place. If ExifTool left files like
+`IMG_1234.jpg_original` next to `IMG_1234.jpg`:
+
+* The `_original` file is the **unmodified original**. Windows just doesn't recognise the
+  extension.
+* `Restore-ExifToolOriginals.ps1` renames every `*_original` back to its real name and
+  moves the edited copy to `_exiftool-modified\`:
+  ```powershell
+  .\Restore-ExifToolOriginals.ps1 -Path 'E:\Photos' -WhatIf   # preview
+  .\Restore-ExifToolOriginals.ps1 -Path 'E:\Photos'
+  ```
+  (Add `-DeleteModified` to delete the edited copies instead.)
+* Then run `Invoke-GPhotosMetadataFix.ps1` from the restored (or freshly extracted)
+  Takeout folder into a new destination.
+
+[AUDIT.md](AUDIT.md) explains what went wrong in detail.
+
+## Tests
 
 ```powershell
-param (
-    [string]$PhotoRoot = "D:\Downloads\Takeout\Google Photos\Photos from 2020\New folder",
-    [string]$ExifToolPath = "D:\Applications\exiftool\exiftool.exe"
-)
-````
-
-### Step 2: Set the Photo Root Directory
-
-Change the value for the **`$PhotoRoot`** parameter to the path of the folder containing your Google Photos Takeout files. The script is **recursive**, meaning it will process all subfolders within this path.
-
-| Original Example | Your Required Change |
-| :--- | :--- |
-| `[string]$PhotoRoot = "D:\Downloads\Takeout\Google Photos\Photos from 2020\New folder"` | `[string]$PhotoRoot = "C:\Users\YourName\Desktop\MyTakeout\Google Photos"` |
-
-### Step 3: Set the ExifTool Path
-
-Change the value for the **`$ExifToolPath`** parameter to the exact location of the `exiftool.exe` file you downloaded.
-
-| Original Example | Your Required Change |
-| :--- | :--- |
-| `[string]$ExifToolPath = "D:\Applications\exiftool\exiftool.exe"` | `[string]$ExifToolPath = "C:\Tools\ExifTool\exiftool.exe"` |
-
-### Step 4: Execute the Script
-
-You can run the script using either **PowerShell** or **Command Prompt (CMD)**.
-
-#### **Option A: Running via PowerShell**
-
-1.  Open **PowerShell** (search for it in the Start Menu).
-2.  Navigate to the directory where you saved the **`Invoke-GPhotosMetadataFix.ps1`** script:
-    ```powershell
-    cd C:\path\to\your\script\
-    ```
-3.  Run the script:
-    ```powershell
-    .\Invoke-GPhotosMetadataFix.ps1
-    ```
-
-#### **Option B: Running via Command Prompt (CMD)**
-
-1.  Open **Command Prompt (CMD)**.
-2.  Run the script using the following command structure. Make sure to update the path to the script file:
-    ```cmd
-    powershell -ExecutionPolicy Bypass -File D:\Applications\exiftool\Invoke-GPhotosMetadataFix.ps1
-    ```
-
-The script will begin recursively scanning the photo root directory and display the actions it performs on each file, including any restored dates or GPS coordinates.
-
------
-
-## Tags Written to Media
-
-The script writes the following metadata tags based on the file type:
-
-| Data Type | Image Files (.jpg, .png) | Video Files (.mp4, .mov) |
-| :--- | :--- | :--- |
-| **Date/Time** | `EXIF:DateTimeOriginal`, `EXIF:CreateDate`, `EXIF:ModifyDate`, `XMP:CreateDate`, `XMP:DateCreated` | `QuickTime:CreateDate`, `QuickTime:ModifyDate`, `TrackCreateDate`, `TrackModifyDate`, `MediaCreateDate`, `MediaModifyDate` |
-| **Description** | `ImageDescription`, `XMP:Description` | `XMP:Description`, `QuickTime:Comment` |
-| **GPS** | `EXIF:GPSLatitude`, `EXIF:GPSLongitude`, `EXIF:GPSAltitude` | `EXIF:GPSLatitude`, `EXIF:GPSLongitude`, `EXIF:GPSAltitude` |
-
+.\tests\Invoke-Tests.ps1 -ExifToolPath 'C:\Tools\exiftool.exe'
 ```
-```
+
+This builds a fake Takeout folder in your temp directory, runs both scripts against it
+and checks the results (70 checks). It's worth running once on your own PC before
+processing your real library.
+
+## Credits
+
+The original script and README were written with help from OpenAI and Google language
+models. The rewrite, audit and tests were done with Claude Code.
